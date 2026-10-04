@@ -1,0 +1,6 @@
+ruc.db
+ruc.db-*
+*.tmp
+/dist/
+/data/
+.DS_Store

@@ -1,0 +1,5 @@
+.git
+ruc.db*
+*.tmp
+dist/
+data/

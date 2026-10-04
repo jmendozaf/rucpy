@@ -1,0 +1,14 @@
+services:
+  ruc:
+    build: .
+    image: rucpy
+    ports:
+      - "8080:8080"
+    environment:
+      RUC_SYNC_EVERY: 24h
+    volumes:
+      - ruc-data:/data
+    restart: unless-stopped
+
+volumes:
+  ruc-data:
