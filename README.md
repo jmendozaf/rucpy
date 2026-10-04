@@ -53,6 +53,57 @@ git clone https://github.com/jmendozaf/rucpy && cd rucpy
 docker compose up -d
 ```
 
+## Primeros pasos
+
+Con el binario instalado:
+
+**1. Validar un RUC, sin conexión**
+
+```sh
+ruc check 2038893-4    # válido: 2038893-4
+ruc check 2038893-5    # inválido: el dígito verificador de 2038893 es 4
+```
+
+**2. Descargar el padrón** (~25 segundos, crea una base de ~250 MB)
+
+```sh
+export RUC_DB=~/.local/share/ruc.db   # agregalo a tu ~/.zshrc o ~/.bashrc para dejarlo fijo
+mkdir -p ~/.local/share
+ruc sync
+```
+
+Sin `RUC_DB`, la base se crea como `ruc.db` en la carpeta donde estés.
+
+**3. Consultar**
+
+```sh
+ruc get 2038893-4                      # por RUC
+ruc get MEFA8203705                    # por el código viejo de la SET
+ruc search "mendoza franco" --limit 5  # por nombre, sin importar tildes
+ruc stats                              # totales por estado y fecha del padrón
+```
+
+**4. Levantar la API**
+
+```sh
+ruc serve --sync-every 24h
+```
+
+En otra terminal (o en el navegador):
+
+```sh
+curl localhost:8080/v1/ruc/2038893-4
+curl "localhost:8080/v1/search?q=mendoza%20franco"
+```
+
+**5. Mantenerlo al día**
+
+```sh
+ruc sync    # al día: 2020504 RUC, la DNIT no publicó cambios
+```
+
+Solo descarga los archivos que la DNIT haya vuelto a publicar. Con `ruc serve --sync-every 24h` (o la imagen Docker) se hace solo.
+
 ## API
 
 | Método | Ruta | Respuesta |
