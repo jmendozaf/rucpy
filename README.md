@@ -42,7 +42,7 @@ Descargá el de tu sistema desde [Releases](https://github.com/jmendozaf/rucpy/r
 
 ```sh
 curl -L https://github.com/jmendozaf/rucpy/releases/latest/download/ruc-darwin-arm64.tar.gz | tar xz
-mv ruc-darwin-arm64 /usr/local/bin/ruc
+sudo mv ruc-darwin-arm64 /usr/local/bin/ruc
 ruc sync
 ```
 
