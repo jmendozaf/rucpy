@@ -1,4 +1,4 @@
-# rucpy
+# rucpy 🇵🇾
 
 Padrón de RUC de Paraguay, local y rápido. Descarga el listado oficial de la DNIT, lo indexa en SQLite y lo expone por línea de comandos o API HTTP.
 
@@ -20,16 +20,37 @@ $ ruc get 2038893-4
 - **Historial de cambios de estado** entre sincronizaciones: quién pasó de ACTIVO a SUSPENDIDO o CANCELADO.
 - **Un solo binario** sin dependencias, o una imagen Docker de ~14 MB.
 
-## Con Docker
+## Instalación
+
+### Docker
 
 ```sh
-docker compose up -d
+docker run -d --name rucpy -p 8080:8080 -v ruc-data:/data ghcr.io/jmendozaf/rucpy
 ```
 
-La primera vez descarga el padrón completo (unos 25 segundos) y después lo actualiza cada 24 horas. Mientras se actualiza, la API sigue respondiendo con la versión anterior y cambia a la nueva sin cortes.
+La primera vez descarga el padrón completo (unos 25 segundos) y después lo actualiza cada 24 horas. Mientras se actualiza, la API sigue respondiendo con la versión anterior y cambia a la nueva sin cortes. La imagen pesa ~14 MB y funciona en amd64 y arm64.
 
 ```sh
 curl localhost:8080/v1/ruc/2038893-4
+```
+
+Para cambiar la frecuencia, pasá `-e RUC_SYNC_EVERY=12h` (o `0` para no actualizar nunca).
+
+### Binario
+
+Descargá el de tu sistema desde [Releases](https://github.com/jmendozaf/rucpy/releases/latest) (Linux, macOS, Windows):
+
+```sh
+curl -L https://github.com/jmendozaf/rucpy/releases/latest/download/ruc-darwin-arm64.tar.gz | tar xz
+mv ruc-darwin-arm64 /usr/local/bin/ruc
+ruc sync
+```
+
+### Desde el código
+
+```sh
+git clone https://github.com/jmendozaf/rucpy && cd rucpy
+docker compose up -d
 ```
 
 ## API
@@ -61,8 +82,8 @@ Códigos de salida: `0` ok, `1` RUC inválido o error, `3` no está en el padró
 Con Docker sin instalar nada:
 
 ```sh
-docker run --rm -v ruc-data:/data rucpy sync
-docker run --rm -v ruc-data:/data rucpy get 2038893-4
+docker run --rm -v ruc-data:/data ghcr.io/jmendozaf/rucpy sync
+docker run --rm -v ruc-data:/data ghcr.io/jmendozaf/rucpy get 2038893-4
 ```
 
 ## Cómo funciona
