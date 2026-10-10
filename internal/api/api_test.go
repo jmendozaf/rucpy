@@ -128,8 +128,11 @@ func TestCORSOnlyForAllowedOrigins(t *testing.T) {
 	if got := allow("https://jmendozaf.github.io"); got != "https://jmendozaf.github.io" {
 		t.Errorf("allowed origin got %q", got)
 	}
-	if got := allow("https://evil.example"); got != "" {
+	if got := allow("https://evil.example"); got == "https://evil.example" || got == "*" {
 		t.Errorf("other origin got %q", got)
+	}
+	if got := allow(""); got != "https://jmendozaf.github.io" {
+		t.Errorf("a request without Origin should carry the same header, so a CDN can cache it: %q", got)
 	}
 }
 

@@ -21,6 +21,8 @@ ProtectHome=yes
 PrivateTmp=yes
 NoNewPrivileges=yes
 MemoryMax=1G
+# One core at most, so a burst of searches cannot starve other sites on the same server.
+CPUQuota=100%
 
 [Install]
 WantedBy=multi-user.target

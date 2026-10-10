@@ -84,15 +84,19 @@ func (s *Server) Handler() http.Handler {
 }
 
 // cors lets the allowed sites read the responses. Every route is a simple GET, so there is no preflight to answer.
+// With "*" or a single allowed site the header is the same for every request, so a CDN that ignores
+// Vary (Cloudflare does) can cache the response no matter who asked first.
 func (s *Server) cors(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if origin := r.Header.Get("Origin"); origin != "" {
-			if slices.Contains(s.AllowedOrigins, "*") {
-				w.Header().Set("Access-Control-Allow-Origin", "*")
-			} else if slices.Contains(s.AllowedOrigins, origin) {
-				w.Header().Set("Access-Control-Allow-Origin", origin)
-				w.Header().Add("Vary", "Origin")
-			}
+		origin := r.Header.Get("Origin")
+		switch {
+		case slices.Contains(s.AllowedOrigins, "*"):
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+		case len(s.AllowedOrigins) == 1:
+			w.Header().Set("Access-Control-Allow-Origin", s.AllowedOrigins[0])
+		case slices.Contains(s.AllowedOrigins, origin):
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Add("Vary", "Origin")
 		}
 		next.ServeHTTP(w, r)
 	})
