@@ -48,15 +48,16 @@
   <div id="results" class="results" aria-live="polite"></div>
 
   <h2>Usalo desde tu código</h2>
-  <pre><code>GET /v1/ruc/80012345-6        un contribuyente
-GET /v1/search?q=nombre       búsqueda por nombre o razón social
-GET /v1/stats                 total por estado y fecha del padrón</code></pre>
+  <pre><code>GET https://ruc.jmf.dev/v1/ruc/80012345-6     un contribuyente
+GET https://ruc.jmf.dev/v1/search?q=nombre    búsqueda por nombre o razón social
+GET https://ruc.jmf.dev/v1/stats              total por estado y fecha del padrón</code></pre>
   <p>O corré tu propia copia con la línea de comandos, la API o Docker: <a href="https://github.com/jmendozaf/rucpy">github.com/jmendozaf/rucpy</a>.</p>
 
   <footer>Datos públicos de la DNIT, sin modificar. Proyecto de <a href="https://jmf.dev">jmf.dev</a>.</footer>
 </main>
 <script>
-const API = new URLSearchParams(location.search).get("api") || "https://ruc.jmf.dev";
+const params = new URLSearchParams(location.search);
+const API = params.get("api") || "https://ruc.jmf.dev";
 
 const q = document.getElementById("q");
 const hint = document.getElementById("hint");
@@ -107,6 +108,8 @@ let pending;
 async function lookup() {
   const input = q.value.trim();
   pending?.abort();
+  params[input ? "set" : "delete"]("q", input);
+  history.replaceState(null, "", params.size ? "?" + params : location.pathname);
   if (!input) { say(""); results.replaceChildren(); return; }
 
   const ruc = parseRUC(input);
@@ -144,6 +147,7 @@ async function lookup() {
 
 let timer;
 q.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(lookup, 250); });
+if (params.get("q")) { q.value = params.get("q"); lookup(); }
 
 fetch(`${API}/v1/stats`).then(r => r.json()).then(s => {
   const date = new Date(s.synced_at).toLocaleDateString("es-PY", { day: "2-digit", month: "2-digit", year: "numeric" });
