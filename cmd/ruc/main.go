@@ -310,6 +310,8 @@ func runServe(ctx context.Context, args []string) error {
 			srv.AllowedOrigins = append(srv.AllowedOrigins, origin)
 		}
 	}
+	// Read from the environment only, so the secret does not show up in the process list.
+	srv.TurnstileSecret = os.Getenv("RUC_TURNSTILE_SECRET")
 
 	if *every > 0 {
 		go keepSynced(ctx, *db, *every, srv, log)

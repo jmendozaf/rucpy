@@ -35,6 +35,7 @@
   code { padding: .1rem .35rem; }
   pre { padding: .9rem 1rem; overflow-x: auto; }
   pre code { padding: 0; background: none; }
+  #captcha:not(:empty) { margin-top: 1rem; }
   footer { margin-top: 3rem; font-size: .85rem; color: var(--muted); }
 </style>
 </head>
@@ -45,15 +46,18 @@
 
   <input id="q" type="search" placeholder="80012345-6 o nombre" autocomplete="off" autofocus aria-label="RUC o nombre">
   <p id="hint" class="hint"></p>
+  <div id="captcha"></div>
   <div id="results" class="results" aria-live="polite"></div>
 
   <p>Es una demo de <a href="https://github.com/jmendozaf/rucpy">rucpy</a>: para usarlo desde tu código, corré tu propia copia con la línea de comandos, la API o Docker.</p>
 
   <footer>Datos públicos de la DNIT, sin modificar. Proyecto de <a href="https://jmf.dev">jmf.dev</a>.</footer>
 </main>
+<script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit&onload=onTurnstileLoad" async defer></script>
 <script>
+const API = "https://ruc.jmf.dev";
+const TURNSTILE_SITE_KEY = "0x4AAAAAAFTWKNd7fmqsnwrZ";
 const params = new URLSearchParams(location.search);
-const API = params.get("api") || "https://ruc.jmf.dev";
 
 const q = document.getElementById("q");
 const hint = document.getElementById("hint");
@@ -100,6 +104,49 @@ function say(text, bad = false) {
   hint.className = "hint" + (bad ? " bad" : "");
 }
 
+// The API only answers with a session, which it hands out after Cloudflare Turnstile checks that a person is
+// on this page. Turnstile stays invisible unless it needs the visitor to click.
+const turnstileReady = new Promise(resolve => { window.onTurnstileLoad = resolve; });
+let widget, waitingToken, session, sessionRequest;
+
+function humanToken() {
+  return turnstileReady.then(() => new Promise((resolve, reject) => {
+    waitingToken = { resolve, reject };
+    if (widget === undefined) {
+      widget = turnstile.render("#captcha", {
+        sitekey: TURNSTILE_SITE_KEY,
+        appearance: "interaction-only",
+        language: "es",
+        callback: token => waitingToken.resolve(token),
+        "error-callback": () => { waitingToken.reject(new Error("turnstile")); return true; },
+      });
+    } else {
+      turnstile.reset(widget);
+    }
+  }));
+}
+
+function getSession() {
+  if (session && session.expires - Date.now() > 60_000) { return Promise.resolve(session.value); }
+  sessionRequest ??= humanToken()
+    .then(token => fetch(`${API}/v1/session`, { method: "POST", body: new URLSearchParams({ token }) }))
+    .then(resp => resp.ok ? resp.json() : Promise.reject(new Error("session")))
+    .then(s => { session = { value: s.session, expires: Date.parse(s.expires_at) }; return s.session; })
+    .finally(() => { sessionRequest = null; });
+  return sessionRequest;
+}
+
+// api calls the API with the session, asking Turnstile again once if the session expired or the IP changed.
+async function api(path, signal, retry = true) {
+  const value = await getSession();
+  const resp = await fetch(`${API}${path}${path.includes("?") ? "&" : "?"}session=${encodeURIComponent(value)}`, { signal });
+  if (resp.status === 401 && retry) {
+    session = null;
+    return api(path, signal, false);
+  }
+  return resp;
+}
+
 let pending;
 async function lookup() {
   const input = q.value.trim();
@@ -118,10 +165,10 @@ async function lookup() {
       return;
     }
     say(ruc.dv === null ? `Dígito verificador: ${ruc.base}-${expected}` : "Dígito verificador correcto.");
-    url = `${API}/v1/ruc/${encodeURIComponent(ruc.base)}`;
+    url = `/v1/ruc/${encodeURIComponent(ruc.base)}`;
   } else if (input.split(/[^\p{L}\p{N}]+/u).some(w => [...w].length >= 3)) {
     say("");
-    url = `${API}/v1/search?q=${encodeURIComponent(input)}&limit=20`;
+    url = `/v1/search?q=${encodeURIComponent(input)}&limit=20`;
   } else {
     say("Escribí al menos 3 letras.");
     results.replaceChildren();
@@ -130,14 +177,17 @@ async function lookup() {
 
   pending = new AbortController();
   try {
-    const resp = await fetch(url, { signal: pending.signal });
+    const resp = await api(url, pending.signal);
     const body = await resp.json();
     if (resp.status === 404) { show([], "No está en el padrón de la DNIT."); return; }
     if (resp.status === 429 || resp.status === 503) { show([], "Demasiadas consultas seguidas. Probá en unos segundos."); return; }
     if (!resp.ok) { show([], body.message || "No se pudo consultar."); return; }
     show(ruc ? [body] : body.data, "Sin resultados.");
   } catch (err) {
-    if (err.name !== "AbortError") { show([], "No se pudo conectar con la API."); }
+    if (err.name === "AbortError") { return; }
+    show([], err.message === "turnstile" || err.message === "session"
+      ? "No pudimos comprobar que sos una persona. Recargá la página."
+      : "No se pudo conectar con la API.");
   }
 }
 
@@ -145,7 +195,7 @@ let timer;
 q.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(lookup, 250); });
 if (params.get("q")) { q.value = params.get("q"); lookup(); }
 
-fetch(`${API}/v1/stats`).then(r => r.json()).then(s => {
+api("/v1/stats").then(r => r.json()).then(s => {
   const date = new Date(s.synced_at).toLocaleDateString("es-PY", { day: "2-digit", month: "2-digit", year: "numeric" });
   document.getElementById("stats").textContent = `${s.total.toLocaleString("es-PY")} contribuyentes, actualizado al ${date}.`;
 }).catch(() => {});

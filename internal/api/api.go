@@ -26,6 +26,12 @@ const cacheFor = "public, max-age=3600"
 type Server struct {
 	// AllowedOrigins lists the sites whose pages may call the API from the browser (CORS); "*" allows any.
 	AllowedOrigins []string
+	// TurnstileSecret, when set, makes every /v1 request carry a session obtained by passing Cloudflare
+	// Turnstile on the page (POST /v1/session), so only people on that page can use the API.
+	TurnstileSecret string
+
+	turnstileURL string
+	sessionKey   []byte
 
 	path string
 	// searchSlots caps concurrent searches, the only expensive request, so a burst cannot take every CPU.
@@ -37,7 +43,13 @@ type Server struct {
 
 // New opens dbPath (if it exists yet) and returns a server for it.
 func New(dbPath string, log *slog.Logger) *Server {
-	s := &Server{path: dbPath, log: log, searchSlots: make(chan struct{}, MaxConcurrentSearches)}
+	s := &Server{
+		path:         dbPath,
+		log:          log,
+		searchSlots:  make(chan struct{}, MaxConcurrentSearches),
+		turnstileURL: turnstileVerifyURL,
+		sessionKey:   newSessionKey(),
+	}
 	if err := s.Reload(); err != nil {
 		log.Warn("database not ready yet; run a sync", "path", dbPath, "err", err)
 	}
@@ -80,10 +92,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/search", s.withStore(s.search))
 	mux.HandleFunc("GET /v1/changes", s.withStore(s.changes))
 	mux.HandleFunc("GET /v1/stats", s.withStore(s.stats))
-	return s.cors(mux)
+	mux.HandleFunc("POST /v1/session", s.createSession)
+	return s.cors(s.requireSession(mux))
 }
 
-// cors lets the allowed sites read the responses. Every route is a simple GET, so there is no preflight to answer.
+// cors lets the allowed sites read the responses. Every route is a simple GET or form POST, so there is no preflight to answer.
 // With "*" or a single allowed site the header is the same for every request, so a CDN that ignores
 // Vary (Cloudflare does) can cache the response no matter who asked first.
 func (s *Server) cors(next http.Handler) http.Handler {
@@ -100,6 +113,14 @@ func (s *Server) cors(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// cacheControl keeps responses out of shared caches when they require a session, so a CDN cannot hand them out.
+func (s *Server) cacheControl() string {
+	if s.TurnstileSecret != "" {
+		return "private, max-age=3600"
+	}
+	return cacheFor
 }
 
 func (s *Server) withStore(h func(http.ResponseWriter, *http.Request, *store.Store)) http.HandlerFunc {
@@ -137,7 +158,7 @@ func (s *Server) getRUC(w http.ResponseWriter, r *http.Request, st *store.Store)
 	}
 	t, err := st.Get(r.Context(), parsed.Base)
 	if err == nil || errors.Is(err, store.ErrNotFound) {
-		w.Header().Set("Cache-Control", cacheFor)
+		w.Header().Set("Cache-Control", s.cacheControl())
 	}
 	if errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "not_found", "the RUC is not in the DNIT registry")
@@ -168,7 +189,7 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request, st *store.Store)
 		s.fail(w, err)
 		return
 	}
-	w.Header().Set("Cache-Control", cacheFor)
+	w.Header().Set("Cache-Control", s.cacheControl())
 	writeJSON(w, http.StatusOK, map[string]any{"data": results})
 }
 
@@ -196,7 +217,7 @@ func (s *Server) stats(w http.ResponseWriter, r *http.Request, st *store.Store) 
 		s.fail(w, err)
 		return
 	}
-	w.Header().Set("Cache-Control", cacheFor)
+	w.Header().Set("Cache-Control", s.cacheControl())
 	writeJSON(w, http.StatusOK, stats)
 }
 

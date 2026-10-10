@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"path/filepath"
 	"testing"
 	"time"
@@ -172,5 +173,72 @@ func TestReportsWhenNotSyncedYet(t *testing.T) {
 	}
 	if code, _ := getJSON(t, ts.URL+"/healthz"); code != http.StatusOK {
 		t.Errorf("healthz: %d", code)
+	}
+}
+
+// newGatedAPI requires Turnstile sessions, with a fake siteverify that accepts only the token "human".
+func newGatedAPI(t *testing.T) *httptest.Server {
+	t.Helper()
+	verify := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]bool{"success": r.PostFormValue("secret") == "s3cret" && r.PostFormValue("response") == "human"})
+	}))
+	t.Cleanup(verify.Close)
+	srv, ts := newTestAPI(t)
+	srv.TurnstileSecret = "s3cret"
+	srv.turnstileURL = verify.URL
+	return ts
+}
+
+func newSession(t *testing.T, ts *httptest.Server, token string) (int, string) {
+	t.Helper()
+	resp, err := http.PostForm(ts.URL+"/v1/session", url.Values{"token": {token}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var body map[string]string
+	json.NewDecoder(resp.Body).Decode(&body)
+	return resp.StatusCode, body["session"]
+}
+
+func TestTurnstileSessionGatesTheAPI(t *testing.T) {
+	ts := newGatedAPI(t)
+
+	if code, _ := getJSON(t, ts.URL+"/v1/ruc/2038893-4"); code != http.StatusUnauthorized {
+		t.Errorf("without session: %d", code)
+	}
+	if code, _ := getJSON(t, ts.URL+"/v1/ruc/2038893-4?session=123.forged"); code != http.StatusUnauthorized {
+		t.Errorf("forged session: %d", code)
+	}
+	if code, _ := newSession(t, ts, "bot"); code != http.StatusForbidden {
+		t.Errorf("failed Turnstile: %d", code)
+	}
+
+	code, session := newSession(t, ts, "human")
+	if code != http.StatusOK || session == "" {
+		t.Fatalf("session: %d %q", code, session)
+	}
+	if code, body := getJSON(t, ts.URL+"/v1/ruc/2038893-4?session="+url.QueryEscape(session)); code != http.StatusOK || body["formatted"] != "2038893-4" {
+		t.Errorf("with session: %d %v", code, body)
+	}
+	if code, _ := getJSON(t, ts.URL+"/healthz"); code != http.StatusOK {
+		t.Errorf("healthz stays open: %d", code)
+	}
+}
+
+func TestSessionOnlyWorksFromTheIPItWasIssuedTo(t *testing.T) {
+	ts := newGatedAPI(t)
+	_, session := newSession(t, ts, "human")
+
+	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/v1/stats?session="+url.QueryEscape(session), nil)
+	req.Header.Set("X-Forwarded-For", "203.0.113.9")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("session from another IP: %d", resp.StatusCode)
 	}
 }

@@ -61,6 +61,8 @@ sudo systemctl enable --now rucpy     # API en 127.0.0.1:8081, base en /var/lib/
 
 Para que una página en otro dominio pueda consultar la API desde el navegador, listá ese sitio en `RUC_CORS_ORIGINS` (o `--cors`), separado por comas; `*` permite cualquiera.
 
+Para que solo personas en esa página puedan usarla, creá un widget de [Cloudflare Turnstile](https://developers.cloudflare.com/turnstile/) para su dominio y poné la clave secreta en `RUC_TURNSTILE_SECRET` (por ejemplo en `/etc/rucpy.env`, que lee la unidad de systemd). La página pasa Turnstile, pide una sesión con `POST /v1/session` (`token=…`) y la manda en cada consulta como `?session=…`; la sesión dura una hora y vale solo desde la IP que la pidió. Sin esa variable, la API no pide sesión.
+
 ### Desde el código
 
 ```sh

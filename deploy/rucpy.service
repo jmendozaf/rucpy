@@ -12,6 +12,8 @@ Environment=RUC_DB=/var/lib/rucpy/ruc.db
 Environment=RUC_ADDR=127.0.0.1:8081
 Environment=RUC_SYNC_EVERY=24h
 Environment=RUC_CORS_ORIGINS=https://jmendozaf.github.io
+# Optional secrets such as RUC_TURNSTILE_SECRET=…, readable only by root (chmod 600).
+EnvironmentFile=-/etc/rucpy.env
 DynamicUser=yes
 StateDirectory=rucpy
 Restart=on-failure
