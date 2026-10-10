@@ -16,20 +16,28 @@ import (
 	"github.com/jmendozaf/rucpy/internal/store"
 )
 
+// MaxConcurrentSearches is how many searches run at once; the rest get a 503 right away instead of queueing.
+const MaxConcurrentSearches = 2
+
+// cacheFor is how long clients and CDNs may keep a response: the registry changes at most once a day.
+const cacheFor = "public, max-age=3600"
+
 // Server answers HTTP requests against the current database.
 type Server struct {
 	// AllowedOrigins lists the sites whose pages may call the API from the browser (CORS); "*" allows any.
 	AllowedOrigins []string
 
 	path string
-	mu   sync.RWMutex
-	st   *store.Store
-	log  *slog.Logger
+	// searchSlots caps concurrent searches, the only expensive request, so a burst cannot take every CPU.
+	searchSlots chan struct{}
+	mu          sync.RWMutex
+	st          *store.Store
+	log         *slog.Logger
 }
 
 // New opens dbPath (if it exists yet) and returns a server for it.
 func New(dbPath string, log *slog.Logger) *Server {
-	s := &Server{path: dbPath, log: log}
+	s := &Server{path: dbPath, log: log, searchSlots: make(chan struct{}, MaxConcurrentSearches)}
 	if err := s.Reload(); err != nil {
 		log.Warn("database not ready yet; run a sync", "path", dbPath, "err", err)
 	}
@@ -124,6 +132,9 @@ func (s *Server) getRUC(w http.ResponseWriter, r *http.Request, st *store.Store)
 		return
 	}
 	t, err := st.Get(r.Context(), parsed.Base)
+	if err == nil || errors.Is(err, store.ErrNotFound) {
+		w.Header().Set("Cache-Control", cacheFor)
+	}
 	if errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "not_found", "the RUC is not in the DNIT registry")
 		return
@@ -137,8 +148,15 @@ func (s *Server) getRUC(w http.ResponseWriter, r *http.Request, st *store.Store)
 
 func (s *Server) search(w http.ResponseWriter, r *http.Request, st *store.Store) {
 	q := r.URL.Query().Get("q")
-	if len([]rune(q)) < 3 {
-		writeError(w, http.StatusBadRequest, "query_too_short", "q needs at least 3 characters")
+	if !store.Searchable(q) {
+		writeError(w, http.StatusBadRequest, "query_too_short", "q needs a word of at least 3 characters")
+		return
+	}
+	select {
+	case s.searchSlots <- struct{}{}:
+		defer func() { <-s.searchSlots }()
+	default:
+		writeError(w, http.StatusServiceUnavailable, "busy", "too many searches right now, try again in a moment")
 		return
 	}
 	results, err := st.Search(r.Context(), q, intParam(r, "limit", 20))
@@ -146,6 +164,7 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request, st *store.Store)
 		s.fail(w, err)
 		return
 	}
+	w.Header().Set("Cache-Control", cacheFor)
 	writeJSON(w, http.StatusOK, map[string]any{"data": results})
 }
 
@@ -173,6 +192,7 @@ func (s *Server) stats(w http.ResponseWriter, r *http.Request, st *store.Store) 
 		s.fail(w, err)
 		return
 	}
+	w.Header().Set("Cache-Control", cacheFor)
 	writeJSON(w, http.StatusOK, stats)
 }
 

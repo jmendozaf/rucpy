@@ -133,6 +133,10 @@ func (s *Store) Get(ctx context.Context, base string) (Taxpayer, error) {
 	return t, err
 }
 
+// searchCandidates caps how many matches a search ranks. A generic query such as "mar" matches hundreds of
+// thousands of names and ranking all of them takes about a second; only the first ones are ranked instead.
+const searchCandidates = 2000
+
 // Search finds taxpayers whose name contains every word of query (prefix match, accent-insensitive).
 func (s *Store) Search(ctx context.Context, query string, limit int) ([]Taxpayer, error) {
 	match := ftsQuery(query)
@@ -141,10 +145,10 @@ func (s *Store) Search(ctx context.Context, query string, limit int) ([]Taxpayer
 	}
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT r.ruc, r.dv, r.name, r.old_code, r.status
-		 FROM rucs_fts f JOIN rucs r ON r.id = f.rowid
-		 WHERE rucs_fts MATCH ?
+		 FROM (SELECT rowid, rank FROM rucs_fts WHERE rucs_fts MATCH ? LIMIT ?) f
+		 JOIN rucs r ON r.id = f.rowid
 		 ORDER BY (r.status = 'ACTIVO') DESC, f.rank
-		 LIMIT ?`, match, clamp(limit, 1, 100))
+		 LIMIT ?`, match, searchCandidates, clamp(limit, 1, 100))
 	if err != nil {
 		return nil, err
 	}
@@ -161,12 +165,19 @@ func (s *Store) Search(ctx context.Context, query string, limit int) ([]Taxpayer
 	return results, rows.Err()
 }
 
+// Searchable reports whether query has at least one word long enough to search for.
+func Searchable(query string) bool { return ftsQuery(query) != "" }
+
 // ftsQuery turns free text into a safe FTS5 query: each word quoted and prefix-matched.
+// Words under three letters ("de", "a") are dropped: as prefixes they match most of the registry
+// and make the search slow without narrowing it.
 func ftsQuery(query string) string {
 	words := strings.FieldsFunc(query, func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) })
 	terms := make([]string, 0, len(words))
 	for _, w := range words {
-		terms = append(terms, `"`+w+`"*`)
+		if len([]rune(w)) >= 3 {
+			terms = append(terms, `"`+w+`"*`)
+		}
 	}
 	return strings.Join(terms, " ")
 }

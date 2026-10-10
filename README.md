@@ -124,7 +124,7 @@ Solo descarga los archivos que la DNIT haya vuelto a publicar. Con `ruc serve --
 | Método | Ruta | Respuesta |
 |---|---|---|
 | `GET` | `/v1/ruc/{ruc}` | Contribuyente. Acepta `2038893-4`, `2.038.893-4`, `2038893` o el código viejo de la SET (`MEFA8203705`). `404` si no existe, `422` con el dígito correcto si el DV no coincide. |
-| `GET` | `/v1/search?q=nombre&limit=20` | Búsqueda por nombre o razón social (mínimo 3 caracteres). Los activos primero. |
+| `GET` | `/v1/search?q=nombre&limit=20` | Búsqueda por nombre o razón social (al menos una palabra de 3 letras; las más cortas se ignoran). Los activos primero. |
 | `GET` | `/v1/changes?since=2026-10-01&status=CANCELADO` | Cambios de estado detectados desde esa fecha (por defecto, los últimos 7 días). |
 | `GET` | `/v1/stats` | Total, cantidad por estado, fecha de sincronización y versión de cada archivo. |
 | `GET` | `/healthz` | `{"status":"ok"}` |

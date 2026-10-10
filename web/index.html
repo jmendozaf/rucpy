@@ -123,7 +123,7 @@ async function lookup() {
     }
     say(ruc.dv === null ? `Dígito verificador: ${ruc.base}-${expected}` : "Dígito verificador correcto.");
     url = `${API}/v1/ruc/${encodeURIComponent(ruc.base)}`;
-  } else if ([...input].length >= 3) {
+  } else if (input.split(/[^\p{L}\p{N}]+/u).some(w => [...w].length >= 3)) {
     say("");
     url = `${API}/v1/search?q=${encodeURIComponent(input)}&limit=20`;
   } else {
@@ -137,7 +137,7 @@ async function lookup() {
     const resp = await fetch(url, { signal: pending.signal });
     const body = await resp.json();
     if (resp.status === 404) { show([], "No está en el padrón de la DNIT."); return; }
-    if (resp.status === 429) { show([], "Demasiadas consultas seguidas. Probá en unos segundos."); return; }
+    if (resp.status === 429 || resp.status === 503) { show([], "Demasiadas consultas seguidas. Probá en unos segundos."); return; }
     if (!resp.ok) { show([], body.message || "No se pudo consultar."); return; }
     show(ruc ? [body] : body.data, "Sin resultados.");
   } catch (err) {

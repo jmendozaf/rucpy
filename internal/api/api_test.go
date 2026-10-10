@@ -16,6 +16,12 @@ import (
 
 func newTestServer(t *testing.T, allowedOrigins ...string) *httptest.Server {
 	t.Helper()
+	_, ts := newTestAPI(t, allowedOrigins...)
+	return ts
+}
+
+func newTestAPI(t *testing.T, allowedOrigins ...string) (*Server, *httptest.Server) {
+	t.Helper()
 	db := filepath.Join(t.TempDir(), "ruc.db")
 	ctx := context.Background()
 	b, err := store.NewBuilder(ctx, db, time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC))
@@ -33,7 +39,7 @@ func newTestServer(t *testing.T, allowedOrigins ...string) *httptest.Server {
 	srv.AllowedOrigins = allowedOrigins
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(func() { ts.Close(); srv.Close() })
-	return ts
+	return srv, ts
 }
 
 func getJSON(t *testing.T, url string) (int, map[string]any) {
@@ -97,8 +103,10 @@ func TestSearchIgnoresAccentsAndCase(t *testing.T) {
 func TestSearchRequiresThreeCharacters(t *testing.T) {
 	ts := newTestServer(t)
 
-	if code, _ := getJSON(t, ts.URL+"/v1/search?q=ab"); code != http.StatusBadRequest {
-		t.Errorf("short query: %d", code)
+	for _, q := range []string{"ab", "a+b+c"} {
+		if code, _ := getJSON(t, ts.URL+"/v1/search?q="+q); code != http.StatusBadRequest {
+			t.Errorf("short query %q: %d", q, code)
+		}
 	}
 }
 
@@ -122,6 +130,22 @@ func TestCORSOnlyForAllowedOrigins(t *testing.T) {
 	}
 	if got := allow("https://evil.example"); got != "" {
 		t.Errorf("other origin got %q", got)
+	}
+}
+
+func TestSearchAnswersBusyWhenEverySlotIsTaken(t *testing.T) {
+	srv, ts := newTestAPI(t)
+	for range MaxConcurrentSearches {
+		srv.searchSlots <- struct{}{}
+	}
+
+	if code, body := getJSON(t, ts.URL+"/v1/search?q=mendoza"); code != http.StatusServiceUnavailable || body["error"] != "busy" {
+		t.Errorf("%d %v", code, body)
+	}
+
+	<-srv.searchSlots
+	if code, _ := getJSON(t, ts.URL+"/v1/search?q=mendoza"); code != http.StatusOK {
+		t.Errorf("with a free slot: %d", code)
 	}
 }
 
