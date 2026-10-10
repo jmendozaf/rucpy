@@ -33,7 +33,7 @@ Uso:
   ruc search   <nombre> [--limit 20] [--db]        busca por nombre o razón social
   ruc changes  [--since 2026-10-01] [--status X]   cambios de estado entre sincronizaciones
   ruc stats    [--db ruc.db]                       totales y fecha del padrón
-  ruc serve    [--addr :8080] [--sync-every 24h]   API HTTP
+  ruc serve    [--addr :8080] [--sync-every 24h] [--cors https://sitio]   API HTTP
   ruc version
 
 La base por defecto es $RUC_DB o ./ruc.db.
@@ -297,6 +297,7 @@ func runServe(ctx context.Context, args []string) error {
 	db := fs.String("db", defaultDB(), "archivo de base de datos")
 	addr := fs.String("addr", envOr("RUC_ADDR", ":8080"), "dirección HTTP")
 	every := fs.Duration("sync-every", envDuration("RUC_SYNC_EVERY", 0), "sincronizar cada (0 = nunca), ej: 24h")
+	cors := fs.String("cors", os.Getenv("RUC_CORS_ORIGINS"), "sitios que pueden consultar la API desde el navegador, separados por coma (* = cualquiera)")
 	if _, err := parse(fs, args); err != nil {
 		return err
 	}
@@ -304,6 +305,11 @@ func runServe(ctx context.Context, args []string) error {
 	log := slog.New(slog.NewJSONHandler(os.Stderr, nil))
 	srv := api.New(*db, log)
 	defer srv.Close()
+	for _, origin := range strings.Split(*cors, ",") {
+		if origin = strings.TrimSpace(origin); origin != "" {
+			srv.AllowedOrigins = append(srv.AllowedOrigins, origin)
+		}
+	}
 
 	if *every > 0 {
 		go keepSynced(ctx, *db, *every, srv, log)

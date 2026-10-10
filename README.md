@@ -20,6 +20,8 @@ $ ruc get 2038893-4
 - **Historial de cambios de estado** entre sincronizaciones: quién pasó de ACTIVO a SUSPENDIDO o CANCELADO.
 - **Un solo binario** sin dependencias, o una imagen Docker de ~14 MB.
 
+**Consulta online**, sin instalar nada: **https://jmendozaf.github.io/rucpy/**. La página está en GitHub Pages ([`web/`](web/index.html)) y consulta la API pública en `https://ruc.jmf.dev`.
+
 ## Instalación
 
 ### Docker
@@ -45,6 +47,19 @@ curl -L https://github.com/jmendozaf/rucpy/releases/latest/download/ruc-darwin-a
 sudo mv ruc-darwin-arm64 /usr/local/bin/ruc
 ruc sync
 ```
+
+### Servidor sin Docker
+
+En [`deploy/`](deploy/) hay una unidad de systemd y una configuración de nginx con HTTPS y límite de consultas por IP:
+
+```sh
+curl -L https://github.com/jmendozaf/rucpy/releases/latest/download/ruc-linux-amd64.tar.gz | tar xz
+sudo install -m 755 ruc-linux-amd64 /usr/local/bin/ruc
+sudo cp deploy/rucpy.service /etc/systemd/system/
+sudo systemctl enable --now rucpy     # API en 127.0.0.1:8081, base en /var/lib/rucpy
+```
+
+Para que una página en otro dominio pueda consultar la API desde el navegador, listá ese sitio en `RUC_CORS_ORIGINS` (o `--cors`), separado por comas; `*` permite cualquiera.
 
 ### Desde el código
 
@@ -114,7 +129,7 @@ Solo descarga los archivos que la DNIT haya vuelto a publicar. Con `ruc serve --
 | `GET` | `/v1/stats` | Total, cantidad por estado, fecha de sincronización y versión de cada archivo. |
 | `GET` | `/healthz` | `{"status":"ok"}` |
 
-Errores siempre como `{"error": "...", "message": "..."}`.
+Errores siempre como `{"error": "...", "message": "..."}`. Por defecto la API no responde a páginas de otros dominios; se habilitan con `RUC_CORS_ORIGINS`.
 
 ## Línea de comandos
 
@@ -125,7 +140,7 @@ ruc check 2038893-4                 # valida el dígito verificador, sin conexi�
 ruc search "mendoza franco" --limit 5  # busca por nombre
 ruc changes --since 2026-10-01 --status CANCELADO
 ruc stats
-ruc serve --addr :8080 --sync-every 24h
+ruc serve --addr :8080 --sync-every 24h --cors https://mi-sitio.com
 ```
 
 Códigos de salida: `0` ok, `1` RUC inválido o error, `3` no está en el padrón.

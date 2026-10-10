@@ -1,0 +1,26 @@
+# systemd unit to run the API without Docker.
+#   sudo install -m 755 ruc /usr/local/bin/ruc
+#   sudo cp rucpy.service /etc/systemd/system/ && sudo systemctl enable --now rucpy
+[Unit]
+Description=rucpy: padrón de RUC de la DNIT
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/ruc serve
+Environment=RUC_DB=/var/lib/rucpy/ruc.db
+Environment=RUC_ADDR=127.0.0.1:8081
+Environment=RUC_SYNC_EVERY=24h
+Environment=RUC_CORS_ORIGINS=https://jmendozaf.github.io
+DynamicUser=yes
+StateDirectory=rucpy
+Restart=on-failure
+RestartSec=5s
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+NoNewPrivileges=yes
+MemoryMax=1G
+
+[Install]
+WantedBy=multi-user.target

@@ -14,7 +14,7 @@ import (
 	"github.com/jmendozaf/rucpy/internal/store"
 )
 
-func newTestServer(t *testing.T) *httptest.Server {
+func newTestServer(t *testing.T, allowedOrigins ...string) *httptest.Server {
 	t.Helper()
 	db := filepath.Join(t.TempDir(), "ruc.db")
 	ctx := context.Background()
@@ -30,6 +30,7 @@ func newTestServer(t *testing.T) *httptest.Server {
 	}
 
 	srv := New(db, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	srv.AllowedOrigins = allowedOrigins
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(func() { ts.Close(); srv.Close() })
 	return ts
@@ -98,6 +99,29 @@ func TestSearchRequiresThreeCharacters(t *testing.T) {
 
 	if code, _ := getJSON(t, ts.URL+"/v1/search?q=ab"); code != http.StatusBadRequest {
 		t.Errorf("short query: %d", code)
+	}
+}
+
+func TestCORSOnlyForAllowedOrigins(t *testing.T) {
+	ts := newTestServer(t, "https://jmendozaf.github.io")
+
+	allow := func(origin string) string {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodGet, ts.URL+"/v1/ruc/2038893-4", nil)
+		req.Header.Set("Origin", origin)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.Header.Get("Access-Control-Allow-Origin")
+	}
+
+	if got := allow("https://jmendozaf.github.io"); got != "https://jmendozaf.github.io" {
+		t.Errorf("allowed origin got %q", got)
+	}
+	if got := allow("https://evil.example"); got != "" {
+		t.Errorf("other origin got %q", got)
 	}
 }
 

@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>rucpy · Consulta de RUC</title>
+<meta name="description" content="Consultá cualquier RUC de Paraguay en el padrón de la DNIT: nombre, estado y dígito verificador. También por nombre o razón social.">
+<style>
+  :root { --bg:#fff; --fg:#0b1220; --muted:#5b6474; --line:#e6e8ec; --accent:#0066ff; --code:#f4f6f9; --ok:#0a7a3d; --warn:#a15c00; --bad:#c0262d; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#0b1220; --fg:#e8ebf0; --muted:#97a0b0; --line:#1e2738; --accent:#5c9dff; --code:#121b2d; --ok:#3ccb7f; --warn:#f0a43c; --bad:#ff6b6b; } }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.55 Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 860px; margin: 0 auto; padding: 48px 16px 64px; }
+  h1 { font-size: 1.9rem; letter-spacing: -0.02em; margin: 0 0 .25rem; }
+  h2 { font-size: 1.1rem; margin: 2.5rem 0 .75rem; }
+  p { color: var(--muted); }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  input { width: 100%; font: inherit; font-size: 1.15rem; padding: .8rem 1rem; color: var(--fg); background: var(--code); border: 1px solid var(--line); border-radius: 10px; outline: none; }
+  input:focus { border-color: var(--accent); }
+  .hint { font-size: .85rem; margin: .5rem 0 0; min-height: 1.4em; }
+  .hint.bad { color: var(--bad); }
+  .results { margin-top: 1.5rem; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .results:empty { display: none; }
+  .row { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; padding: .8rem 1rem; border-bottom: 1px solid var(--line); }
+  .row:last-child { border-bottom: 0; }
+  .row strong { display: block; }
+  .row small { color: var(--muted); font-size: .8rem; font-variant-numeric: tabular-nums; }
+  .ruc { font: .95rem/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap; }
+  .status { font-size: .7rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; white-space: nowrap; color: var(--warn); }
+  .status.activo { color: var(--ok); }
+  .status.cancelado { color: var(--bad); }
+  .empty { padding: .8rem 1rem; color: var(--muted); }
+  code, pre { font: .85rem/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--code); border-radius: 6px; }
+  code { padding: .1rem .35rem; }
+  pre { padding: .9rem 1rem; overflow-x: auto; }
+  pre code { padding: 0; background: none; }
+  footer { margin-top: 3rem; font-size: .85rem; color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Consulta de RUC</h1>
+  <p>Padrón de contribuyentes de la <a href="https://www.dnit.gov.py/web/portal-institucional/listado-de-ruc-con-sus-equivalencias">DNIT</a>. Buscá por RUC o por nombre y razón social. <span id="stats"></span></p>
+
+  <input id="q" type="search" placeholder="80012345-6 o nombre" autocomplete="off" autofocus aria-label="RUC o nombre">
+  <p id="hint" class="hint"></p>
+  <div id="results" class="results" aria-live="polite"></div>
+
+  <h2>Usalo desde tu código</h2>
+  <pre><code>GET /v1/ruc/80012345-6        un contribuyente
+GET /v1/search?q=nombre       búsqueda por nombre o razón social
+GET /v1/stats                 total por estado y fecha del padrón</code></pre>
+  <p>O corré tu propia copia con la línea de comandos, la API o Docker: <a href="https://github.com/jmendozaf/rucpy">github.com/jmendozaf/rucpy</a>.</p>
+
+  <footer>Datos públicos de la DNIT, sin modificar. Proyecto de <a href="https://jmf.dev">jmf.dev</a>.</footer>
+</main>
+<script>
+const API = new URLSearchParams(location.search).get("api") || "https://ruc.jmf.dev";
+
+const q = document.getElementById("q");
+const hint = document.getElementById("hint");
+const results = document.getElementById("results");
+
+// Same algorithm as internal/ruc: modulo 11, weights 2..11 from the right, letters as their ASCII code.
+function checkDigit(base) {
+  const digits = [...base.toUpperCase()].map(c => /\d/.test(c) ? c : String(c.charCodeAt(0))).join("");
+  let total = 0, weight = 2;
+  for (let i = digits.length - 1; i >= 0; i--) {
+    total += Number(digits[i]) * weight;
+    weight = weight === 11 ? 2 : weight + 1;
+  }
+  const rest = total % 11;
+  return rest > 1 ? 11 - rest : 0;
+}
+
+// Returns {base, dv} for inputs such as "80012345-6", "80.012.345-6" or "80012345", or null if it is not a RUC.
+function parseRUC(input) {
+  const s = input.toUpperCase().replace(/\./g, "").trim().replace(/\s*-\s*|\s+/g, "-");
+  const m = s.match(/^(\d{1,9}[A-Z]*)(?:-(\d))?$/);
+  return m ? { base: m[1], dv: m[2] === undefined ? null : Number(m[2]) } : null;
+}
+
+function el(tag, props = {}, children = []) {
+  const node = Object.assign(document.createElement(tag), props);
+  node.append(...children);
+  return node;
+}
+
+function row(t) {
+  return el("div", { className: "row" }, [
+    el("div", {}, [el("strong", { textContent: t.name }), el("span", { className: "ruc", textContent: t.formatted }), t.old_code ? el("small", { textContent: "  ·  " + t.old_code }) : ""]),
+    el("span", { className: "status " + t.status.toLowerCase().split(" ")[0], textContent: t.status }),
+  ]);
+}
+
+function show(list, empty) {
+  results.replaceChildren(...(list.length ? list.map(row) : [el("div", { className: "empty", textContent: empty })]));
+}
+
+function say(text, bad = false) {
+  hint.textContent = text;
+  hint.className = "hint" + (bad ? " bad" : "");
+}
+
+let pending;
+async function lookup() {
+  const input = q.value.trim();
+  pending?.abort();
+  if (!input) { say(""); results.replaceChildren(); return; }
+
+  const ruc = parseRUC(input);
+  let url;
+  if (ruc) {
+    const expected = checkDigit(ruc.base);
+    if (ruc.dv !== null && ruc.dv !== expected) {
+      say(`El dígito verificador de ${ruc.base} es ${expected}, no ${ruc.dv}.`, true);
+      results.replaceChildren();
+      return;
+    }
+    say(ruc.dv === null ? `Dígito verificador: ${ruc.base}-${expected}` : "Dígito verificador correcto.");
+    url = `${API}/v1/ruc/${encodeURIComponent(ruc.base)}`;
+  } else if ([...input].length >= 3) {
+    say("");
+    url = `${API}/v1/search?q=${encodeURIComponent(input)}&limit=20`;
+  } else {
+    say("Escribí al menos 3 letras.");
+    results.replaceChildren();
+    return;
+  }
+
+  pending = new AbortController();
+  try {
+    const resp = await fetch(url, { signal: pending.signal });
+    const body = await resp.json();
+    if (resp.status === 404) { show([], "No está en el padrón de la DNIT."); return; }
+    if (resp.status === 429) { show([], "Demasiadas consultas seguidas. Probá en unos segundos."); return; }
+    if (!resp.ok) { show([], body.message || "No se pudo consultar."); return; }
+    show(ruc ? [body] : body.data, "Sin resultados.");
+  } catch (err) {
+    if (err.name !== "AbortError") { show([], "No se pudo conectar con la API."); }
+  }
+}
+
+let timer;
+q.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(lookup, 250); });
+
+fetch(`${API}/v1/stats`).then(r => r.json()).then(s => {
+  const date = new Date(s.synced_at).toLocaleDateString("es-PY", { day: "2-digit", month: "2-digit", year: "numeric" });
+  document.getElementById("stats").textContent = `${s.total.toLocaleString("es-PY")} contribuyentes, actualizado al ${date}.`;
+}).catch(() => {});
+</script>
+</body>
+</html>

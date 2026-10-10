@@ -7,6 +7,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -17,6 +18,9 @@ import (
 
 // Server answers HTTP requests against the current database.
 type Server struct {
+	// AllowedOrigins lists the sites whose pages may call the API from the browser (CORS); "*" allows any.
+	AllowedOrigins []string
+
 	path string
 	mu   sync.RWMutex
 	st   *store.Store
@@ -68,7 +72,22 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/search", s.withStore(s.search))
 	mux.HandleFunc("GET /v1/changes", s.withStore(s.changes))
 	mux.HandleFunc("GET /v1/stats", s.withStore(s.stats))
-	return mux
+	return s.cors(mux)
+}
+
+// cors lets the allowed sites read the responses. Every route is a simple GET, so there is no preflight to answer.
+func (s *Server) cors(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if origin := r.Header.Get("Origin"); origin != "" {
+			if slices.Contains(s.AllowedOrigins, "*") {
+				w.Header().Set("Access-Control-Allow-Origin", "*")
+			} else if slices.Contains(s.AllowedOrigins, origin) {
+				w.Header().Set("Access-Control-Allow-Origin", origin)
+				w.Header().Add("Vary", "Origin")
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (s *Server) withStore(h func(http.ResponseWriter, *http.Request, *store.Store)) http.HandlerFunc {
