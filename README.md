@@ -20,7 +20,7 @@ $ ruc get 2038893-4
 - **Historial de cambios de estado** entre sincronizaciones: quién pasó de ACTIVO a SUSPENDIDO o CANCELADO.
 - **Un solo binario** sin dependencias, o una imagen Docker de ~14 MB.
 
-**Consulta online**, sin instalar nada: **https://jmendozaf.github.io/rucpy/**. La página está en GitHub Pages ([`web/`](web/index.html)) y consulta la API pública en `https://ruc.jmf.dev`.
+**Demo online**: **https://jmendozaf.github.io/rucpy/**. La página está en [`web/`](web/index.html); la API que usa atiende solo a esa página, así que para tu código corré tu propia copia.
 
 ## Instalación
 
